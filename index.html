@@ -37,6 +37,8 @@
       width: 24px; height: 24px; display: inline-flex; align-items: center;
       justify-content: center; font-size: 13px;
     }
+    .card.hospital { border: 2px solid #2563eb; }
+    .card.hospital h2 .step { background: #0f766e; }
     .hint { font-size: 12px; color: #6b7280; margin: 6px 0 0; line-height: 1.5; }
 
     label { font-size: 13px; color: #374151; display: block; margin-bottom: 4px; }
@@ -52,11 +54,13 @@
     }
     .btn-primary { background: #2563eb; color: #fff; }
     .btn-primary:hover { background: #1d4ed8; }
+    .btn-teal { background: #0f766e; color: #fff; }
+    .btn-teal:hover { background: #115e59; }
     .btn-green { background: #059669; color: #fff; }
     .btn-green:hover { background: #047857; }
     .btn-gray { background: #e5e7eb; color: #374151; }
     .btn-gray:hover { background: #d1d5db; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
     .btn-danger { background: #fee2e2; color: #b91c1c; }
     .btn-danger:hover { background: #fecaca; }
 
@@ -78,8 +82,6 @@
     table { border-collapse: collapse; width: 100%; }
     .min-table td, .min-table th { padding: 6px 8px; }
     .min-table input { width: 70px; }
-
-    .vac-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px; align-items: center; }
 
     /* 달력 */
     .cal-wrap { overflow-x: auto; }
@@ -116,6 +118,7 @@
       background: #d1fae5; border: 1px solid #6ee7b7; color: #065f46;
       border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 12px;
     }
+    .saved-note { font-size: 12px; color: #0f766e; margin-top: 8px; }
 
     /* 통계 / 개인별 표 */
     .stat-table th, .stat-table td {
@@ -133,7 +136,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useMemo } = React;
+    const { useState, useMemo, useEffect } = React;
 
     const SHIFTS = [
       { key: "D", label: "데이", color: "tag-D" },
@@ -141,39 +144,56 @@
       { key: "N", label: "나이트", color: "tag-N" },
     ];
     const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+    const STORAGE_KEY = "nurse_schedule_data_v1";
+
+    // 병원 한 곳의 기본 설정
+    function newHospital(nurses) {
+      return {
+        nurses: nurses || [],
+        minStaff: { D: 2, E: 2, N: 1 },
+        vacations: {}, // { 이름: [일, ...] }
+      };
+    }
+
+    // 저장된 데이터 불러오기 (없으면 예시 병원 1곳 생성)
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.hospitals && Object.keys(parsed.hospitals).length) return parsed;
+        }
+      } catch (e) { /* 무시하고 기본값 */ }
+      return {
+        hospitals: {
+          "예시 병원": newHospital(["김간호", "이간호", "박간호", "최간호", "정간호", "한간호"]),
+        },
+        current: "예시 병원",
+      };
+    }
 
     // ---- 근무표 자동 배정 알고리즘 ----
-    // 규칙:
-    //  - 일요일은 전원 OFF (근무 없음)
-    //  - 연차(휴무 희망일)는 OFF 고정
-    //  - 나이트(N) 다음 날 데이(D) 금지
-    //  - 교대별 하루 최소 인원 충족 시도
-    //  - 근무/휴무를 최대한 공평하게 분배
     function generateSchedule(nurses, year, month, minStaff, vacations) {
       const daysInMonth = new Date(year, month + 1, 0).getDate();
-      // schedule[day] = { 간호사이름: "D"|"E"|"N"|"OFF" }
       const schedule = {};
-      // 누적 통계 (공평성용)
-      const workCount = {};   // 총 근무일 수
-      const lastShift = {};   // 전날 근무 (연속 추적용)
-      const consecutive = {}; // 연속 근무일 수
+      const workCount = {};
+      const lastShift = {};
+      const consecutive = {};
       nurses.forEach((n) => { workCount[n] = 0; lastShift[n] = null; consecutive[n] = 0; });
 
       const warnings = [];
 
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(year, month, day);
-        const dow = date.getDay(); // 0 = 일요일
+        const dow = date.getDay();
         const dayKey = day;
         schedule[dayKey] = {};
 
-        // 일요일 → 전원 OFF
         if (dow === 0) {
           nurses.forEach((n) => { schedule[dayKey][n] = "OFF"; lastShift[n] = "OFF"; consecutive[n] = 0; });
           continue;
         }
 
-        // 이 날 연차로 OFF 고정인 사람
         const onVacation = new Set();
         nurses.forEach((n) => {
           if (vacations[n] && vacations[n].includes(day)) {
@@ -182,46 +202,30 @@
           }
         });
 
-        // 배정 가능한 사람 풀
         const available = nurses.filter((n) => !onVacation.has(n));
-
-        // 교대별로 인원 배정 (N → E → D 순: 나이트 다음날 데이 제약 때문에 나이트 먼저 확정)
         const assignedToday = new Set();
         const order = ["N", "E", "D"];
 
         order.forEach((shift) => {
           const need = minStaff[shift] || 0;
-          // 후보: 아직 오늘 배정 안 됨, 연차 아님
           let candidates = available.filter((n) => !assignedToday.has(n));
-
-          // 제약: 나이트 다음 날 데이 금지
           if (shift === "D") {
             candidates = candidates.filter((n) => lastShift[n] !== "N");
           }
-
-          // 정렬: 근무일 적은 사람 우선(공평), 연속근무 적은 사람 우선
           candidates.sort((a, b) => {
             if (consecutive[a] !== consecutive[b]) return consecutive[a] - consecutive[b];
             if (workCount[a] !== workCount[b]) return workCount[a] - workCount[b];
             return a.localeCompare(b, "ko");
           });
-
           const pick = candidates.slice(0, need);
           if (pick.length < need) {
             warnings.push(`${month + 1}월 ${day}일 ${SHIFTS.find(s=>s.key===shift).label}(${shift}): 필요 ${need}명, 배정 ${pick.length}명 (인원 부족)`);
           }
-          pick.forEach((n) => {
-            schedule[dayKey][n] = shift;
-            assignedToday.add(n);
-          });
+          pick.forEach((n) => { schedule[dayKey][n] = shift; assignedToday.add(n); });
         });
 
-        // 오늘 근무 안 잡힌 사람은 OFF
-        nurses.forEach((n) => {
-          if (!schedule[dayKey][n]) schedule[dayKey][n] = "OFF";
-        });
+        nurses.forEach((n) => { if (!schedule[dayKey][n]) schedule[dayKey][n] = "OFF"; });
 
-        // 통계 업데이트
         nurses.forEach((n) => {
           const s = schedule[dayKey][n];
           if (s === "OFF") { consecutive[n] = 0; }
@@ -235,49 +239,116 @@
 
     function App() {
       const today = new Date();
-      const [nurses, setNurses] = useState(["김간호", "이간호", "박간호", "최간호", "정간호", "한간호"]);
-      const [nameInput, setNameInput] = useState("");
+      const [data, setData] = useState(loadData);      // { hospitals, current }
       const [year, setYear] = useState(today.getFullYear());
-      const [month, setMonth] = useState(today.getMonth()); // 0-based
-      const [minStaff, setMinStaff] = useState({ D: 2, E: 2, N: 1 });
-      const [vacations, setVacations] = useState({}); // { 이름: [일, 일, ...] }
+      const [month, setMonth] = useState(today.getMonth());
+      const [nameInput, setNameInput] = useState("");
       const [vacNurse, setVacNurse] = useState("");
       const [vacDay, setVacDay] = useState("");
       const [result, setResult] = useState(null);
 
+      // 변경될 때마다 자동 저장
+      useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+      }, [data]);
+
+      const current = data.current;
+      const hospital = data.hospitals[current] || newHospital([]);
+      const nurses = hospital.nurses;
+      const minStaff = hospital.minStaff;
+      const vacations = hospital.vacations;
+      const hospitalNames = Object.keys(data.hospitals);
       const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-      // 간호사 추가
+      // 현재 병원 데이터만 수정하는 도우미
+      const updateHospital = (changes) => {
+        setData((d) => ({
+          ...d,
+          hospitals: { ...d.hospitals, [d.current]: { ...d.hospitals[d.current], ...changes } },
+        }));
+        setResult(null);
+      };
+
+      // --- 병원 관리 ---
+      const addHospital = () => {
+        const name = prompt("새 병원 이름을 입력하세요. (예: OO병원 투석실)");
+        if (name === null) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (data.hospitals[trimmed]) { alert("이미 있는 병원 이름입니다."); return; }
+        setData((d) => ({
+          ...d,
+          hospitals: { ...d.hospitals, [trimmed]: newHospital([]) },
+          current: trimmed,
+        }));
+        setResult(null);
+      };
+      const renameHospital = () => {
+        const name = prompt("병원 이름을 바꿉니다. 새 이름:", current);
+        if (name === null) return;
+        const trimmed = name.trim();
+        if (!trimmed || trimmed === current) return;
+        if (data.hospitals[trimmed]) { alert("이미 있는 병원 이름입니다."); return; }
+        setData((d) => {
+          const hospitals = {};
+          Object.keys(d.hospitals).forEach((k) => {
+            hospitals[k === d.current ? trimmed : k] = d.hospitals[k];
+          });
+          return { ...d, hospitals, current: trimmed };
+        });
+      };
+      const deleteHospital = () => {
+        if (hospitalNames.length <= 1) { alert("마지막 병원은 삭제할 수 없습니다. 새 병원을 먼저 추가하세요."); return; }
+        if (!confirm(`'${current}' 병원과 등록된 간호사·설정을 모두 삭제할까요?`)) return;
+        setData((d) => {
+          const hospitals = { ...d.hospitals };
+          delete hospitals[d.current];
+          return { ...d, hospitals, current: Object.keys(hospitals)[0] };
+        });
+        setResult(null);
+      };
+      const switchHospital = (name) => {
+        setData((d) => ({ ...d, current: name }));
+        setResult(null);
+        setVacNurse("");
+      };
+
+      // --- 간호사 ---
       const addNurse = () => {
         const name = nameInput.trim();
         if (!name) return;
         if (nurses.includes(name)) { alert("이미 등록된 이름입니다."); return; }
-        setNurses([...nurses, name]);
+        updateHospital({ nurses: [...nurses, name] });
         setNameInput("");
       };
       const removeNurse = (name) => {
-        setNurses(nurses.filter((n) => n !== name));
-        const v = { ...vacations }; delete v[name]; setVacations(v);
+        const v = { ...vacations }; delete v[name];
+        updateHospital({ nurses: nurses.filter((n) => n !== name), vacations: v });
       };
 
-      // 연차 추가
+      // --- 최소 인원 ---
+      const setMin = (key, val) => {
+        updateHospital({ minStaff: { ...minStaff, [key]: Math.max(0, val || 0) } });
+      };
+
+      // --- 연차 ---
       const addVacation = () => {
         if (!vacNurse) { alert("간호사를 선택하세요."); return; }
         const d = parseInt(vacDay, 10);
         if (!d || d < 1 || d > daysInMonth) { alert("올바른 날짜를 입력하세요 (1~" + daysInMonth + ")."); return; }
         const cur = vacations[vacNurse] || [];
         if (cur.includes(d)) return;
-        setVacations({ ...vacations, [vacNurse]: [...cur, d].sort((a, b) => a - b) });
+        updateHospital({ vacations: { ...vacations, [vacNurse]: [...cur, d].sort((a, b) => a - b) } });
         setVacDay("");
       };
       const removeVacation = (name, d) => {
         const cur = (vacations[name] || []).filter((x) => x !== d);
         const v = { ...vacations };
         if (cur.length) v[name] = cur; else delete v[name];
-        setVacations(v);
+        updateHospital({ vacations: v });
       };
 
-      // 근무표 생성
+      // --- 생성 ---
       const handleGenerate = () => {
         if (nurses.length === 0) { alert("간호사를 먼저 등록하세요."); return; }
         const r = generateSchedule(nurses, year, month, minStaff, vacations);
@@ -288,18 +359,16 @@
         }, 100);
       };
 
-      // 엑셀 내보내기
+      // --- 엑셀 ---
       const exportExcel = () => {
         if (!result) return;
         const { schedule } = result;
-        // 시트1: 달력형 (행=간호사, 열=날짜)
         const header = ["간호사 \\ 날짜"];
         for (let d = 1; d <= daysInMonth; d++) {
           const dow = new Date(year, month, d).getDay();
           header.push(`${d}(${WEEKDAYS[dow]})`);
         }
         header.push("D", "E", "N", "OFF");
-
         const rows = [header];
         nurses.forEach((n) => {
           const row = [n];
@@ -312,28 +381,23 @@
           row.push(cnt.D, cnt.E, cnt.N, cnt.OFF);
           rows.push(row);
         });
-
-        // 하단: 교대별 일일 인원
-        const blank = [""];
-        rows.push(blank);
+        rows.push([""]);
         ["D", "E", "N"].forEach((shift) => {
           const label = SHIFTS.find((s) => s.key === shift).label + `(${shift}) 인원`;
           const row = [label];
           for (let d = 1; d <= daysInMonth; d++) {
-            const c = nurses.filter((n) => schedule[d][n] === shift).length;
-            row.push(c);
+            row.push(nurses.filter((n) => schedule[d][n] === shift).length);
           }
           rows.push(row);
         });
-
         const ws = XLSX.utils.aoa_to_sheet(rows);
         ws["!cols"] = header.map((_, i) => ({ wch: i === 0 ? 14 : 6 }));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, `${year}년 ${month + 1}월`);
-        XLSX.writeFile(wb, `투석실_근무표_${year}년_${month + 1}월.xlsx`);
+        const safe = current.replace(/[\\\/\?\*\[\]:]/g, "_").slice(0, 20);
+        XLSX.utils.book_append_sheet(wb, ws, `${month + 1}월`);
+        XLSX.writeFile(wb, `${safe}_근무표_${year}년_${month + 1}월.xlsx`);
       };
 
-      // 달력 렌더링용 주(week) 배열
       const weeks = useMemo(() => {
         if (!result) return [];
         const firstDow = new Date(year, month, 1).getDay();
@@ -346,7 +410,6 @@
         return w;
       }, [result, year, month, daysInMonth]);
 
-      // 개인별 통계
       const stats = useMemo(() => {
         if (!result) return null;
         const { schedule } = result;
@@ -365,11 +428,32 @@
       return (
         <div className="wrap">
           <h1>🏥 투석실 간호사 근무표 자동 생성기</h1>
-          <p className="subtitle">간호사·연차·최소 인원만 입력하면 한 달치 근무표를 자동으로 만들어 드립니다.</p>
+          <p className="subtitle">병원별로 간호사·설정을 저장해두고, 한 달치 근무표를 자동으로 만듭니다.</p>
+
+          {/* 0. 병원 선택 */}
+          <div className="card hospital">
+            <h2><span className="step">🏥</span> 병원 선택</h2>
+            <div className="row">
+              <div className="field" style={{ minWidth: 200 }}>
+                <label>현재 병원</label>
+                <select value={current} onChange={(e) => switchHospital(e.target.value)} style={{ fontSize: 15, fontWeight: 600 }}>
+                  {hospitalNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <button className="btn-teal btn-sm" onClick={addHospital}>+ 새 병원</button>
+              <button className="btn-gray btn-sm" onClick={renameHospital}>✏️ 이름 변경</button>
+              <button className="btn-danger btn-sm" onClick={deleteHospital}>🗑️ 이 병원 삭제</button>
+            </div>
+            <p className="hint">
+              병원을 선택하면 그 병원의 간호사·최소 인원·연차가 자동으로 불러와집니다.
+              여러 병원을 만들어 따로 관리하세요. (현재 등록된 병원 {hospitalNames.length}곳)
+            </p>
+            <p className="saved-note">💾 모든 변경 사항은 이 기기(브라우저)에 자동 저장됩니다.</p>
+          </div>
 
           {/* 1. 간호사 등록 */}
           <div className="card">
-            <h2><span className="step">1</span> 간호사 등록 / 삭제</h2>
+            <h2><span className="step">1</span> 간호사 등록 / 삭제 <span style={{ fontSize: 13, color: "#0f766e", fontWeight: 600 }}>· {current}</span></h2>
             <div className="row">
               <div className="field">
                 <label>간호사 이름</label>
@@ -400,13 +484,13 @@
             <div className="row" style={{ marginBottom: 14 }}>
               <div className="field">
                 <label>연도</label>
-                <select value={year} onChange={(e) => setYear(+e.target.value)}>
+                <select value={year} onChange={(e) => { setYear(+e.target.value); setResult(null); }}>
                   {[year - 1, year, year + 1, year + 2].map((y) => <option key={y} value={y}>{y}년</option>)}
                 </select>
               </div>
               <div className="field">
                 <label>월</label>
-                <select value={month} onChange={(e) => setMonth(+e.target.value)}>
+                <select value={month} onChange={(e) => { setMonth(+e.target.value); setResult(null); }}>
                   {Array.from({ length: 12 }, (_, i) => <option key={i} value={i}>{i + 1}월</option>)}
                 </select>
               </div>
@@ -423,7 +507,7 @@
                       <input
                         type="number" min="0"
                         value={minStaff[s.key]}
-                        onChange={(e) => setMinStaff({ ...minStaff, [s.key]: Math.max(0, +e.target.value || 0) })}
+                        onChange={(e) => setMin(s.key, +e.target.value)}
                       />
                     </td>
                   ))}
@@ -493,7 +577,7 @@
           {result && (
             <div id="calendar-section">
               <div className="card">
-                <h2>📅 {year}년 {month + 1}월 근무표</h2>
+                <h2>📅 {current} · {year}년 {month + 1}월 근무표</h2>
 
                 {result.warnings.length > 0 ? (
                   <div className="warn">
@@ -554,7 +638,7 @@
                 </div>
               </div>
 
-              {/* 개인별 통계 + 행=간호사 표 */}
+              {/* 개인별 통계 */}
               <div className="card">
                 <h2>👤 간호사별 근무 현황</h2>
                 <div style={{ overflowX: "auto" }}>
@@ -595,7 +679,7 @@
           )}
 
           <p className="subtitle" style={{ textAlign: "center", marginTop: 20 }}>
-            투석실 간호사 근무표 자동 생성기 · 브라우저에서 동작 (데이터는 저장되지 않습니다)
+            투석실 간호사 근무표 자동 생성기 · 병원별 저장은 이 기기(브라우저)에만 보관됩니다
           </p>
         </div>
       );
