@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>투석실 간호사 근무표 자동 생성기</title>
+
+  <!-- React / ReactDOM / Babel (브라우저에서 바로 실행) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- 엑셀 내보내기용 라이브러리 (SheetJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f3f4f6;
+      color: #1f2937;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    .subtitle { color: #6b7280; margin: 0 0 20px; font-size: 14px; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card h2 { font-size: 17px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+    .card h2 .step {
+      background: #2563eb; color: #fff; border-radius: 50%;
+      width: 24px; height: 24px; display: inline-flex; align-items: center;
+      justify-content: center; font-size: 13px;
+    }
+    .hint { font-size: 12px; color: #6b7280; margin: 6px 0 0; line-height: 1.5; }
+
+    label { font-size: 13px; color: #374151; display: block; margin-bottom: 4px; }
+    input, select {
+      padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: 14px; font-family: inherit;
+    }
+    input:focus, select:focus { outline: 2px solid #93c5fd; border-color: #2563eb; }
+
+    button {
+      cursor: pointer; border: none; border-radius: 8px; padding: 9px 16px;
+      font-size: 14px; font-family: inherit; font-weight: 600;
+    }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-green { background: #059669; color: #fff; }
+    .btn-green:hover { background: #047857; }
+    .btn-gray { background: #e5e7eb; color: #374151; }
+    .btn-gray:hover { background: #d1d5db; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-danger { background: #fee2e2; color: #b91c1c; }
+    .btn-danger:hover { background: #fecaca; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; }
+
+    .nurse-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .nurse-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 20px;
+      padding: 5px 8px 5px 14px; font-size: 14px;
+    }
+    .nurse-chip button {
+      background: #dbeafe; color: #1e40af; border-radius: 50%;
+      width: 20px; height: 20px; padding: 0; font-size: 14px; line-height: 1;
+    }
+    .nurse-chip button:hover { background: #bfdbfe; }
+
+    table { border-collapse: collapse; width: 100%; }
+    .min-table td, .min-table th { padding: 6px 8px; }
+    .min-table input { width: 70px; }
+
+    .vac-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px; align-items: center; }
+
+    /* 달력 */
+    .cal-wrap { overflow-x: auto; }
+    table.cal { table-layout: fixed; min-width: 760px; }
+    table.cal th, table.cal td {
+      border: 1px solid #e5e7eb; vertical-align: top;
+      width: 14.28%; height: 92px; padding: 4px; font-size: 12px;
+    }
+    table.cal th { background: #f9fafb; height: auto; padding: 6px; text-align: center; font-size: 13px; }
+    .day-num { font-weight: 700; font-size: 12px; margin-bottom: 3px; }
+    .sun { color: #dc2626; }
+    .sat { color: #2563eb; }
+    .cal .other-month { background: #fafafa; color: #d1d5db; }
+    .cal .sunday-cell { background: #fef2f2; }
+
+    .assign-line { display: flex; gap: 3px; margin-bottom: 2px; flex-wrap: wrap; }
+    .tag {
+      display: inline-block; border-radius: 4px; padding: 1px 4px;
+      font-size: 11px; font-weight: 600;
+    }
+    .tag-label { width: 16px; text-align: center; color: #fff; }
+    .tag-D { background: #f59e0b; }
+    .tag-E { background: #8b5cf6; }
+    .tag-N { background: #1e3a8a; }
+    .name-pill { background: #f3f4f6; border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+    .day-off { background: #fee2e2; color:#b91c1c; }
+
+    .warn {
+      background: #fef3c7; border: 1px solid #fcd34d; color: #92400e;
+      border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 12px;
+      white-space: pre-line; line-height: 1.6;
+    }
+    .ok {
+      background: #d1fae5; border: 1px solid #6ee7b7; color: #065f46;
+      border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 12px;
+    }
+
+    /* 통계 / 개인별 표 */
+    .stat-table th, .stat-table td {
+      border: 1px solid #e5e7eb; padding: 6px 8px; font-size: 12px; text-align: center;
+    }
+    .stat-table th { background: #f9fafb; }
+    .stat-table td:first-child, .stat-table th:first-child { text-align: left; position: sticky; left: 0; background:#fff; }
+    .stat-table th:first-child { background:#f9fafb; }
+
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; margin-top: 10px; color:#4b5563; }
+    .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    const SHIFTS = [
+      { key: "D", label: "데이", color: "tag-D" },
+      { key: "E", label: "이브닝", color: "tag-E" },
+      { key: "N", label: "나이트", color: "tag-N" },
+    ];
+    const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+    // ---- 근무표 자동 배정 알고리즘 ----
+    // 규칙:
+    //  - 일요일은 전원 OFF (근무 없음)
+    //  - 연차(휴무 희망일)는 OFF 고정
+    //  - 나이트(N) 다음 날 데이(D) 금지
+    //  - 교대별 하루 최소 인원 충족 시도
+    //  - 근무/휴무를 최대한 공평하게 분배
+    function generateSchedule(nurses, year, month, minStaff, vacations) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      // schedule[day] = { 간호사이름: "D"|"E"|"N"|"OFF" }
+      const schedule = {};
+      // 누적 통계 (공평성용)
+      const workCount = {};   // 총 근무일 수
+      const lastShift = {};   // 전날 근무 (연속 추적용)
+      const consecutive = {}; // 연속 근무일 수
+      nurses.forEach((n) => { workCount[n] = 0; lastShift[n] = null; consecutive[n] = 0; });
+
+      const warnings = [];
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dow = date.getDay(); // 0 = 일요일
+        const dayKey = day;
+        schedule[dayKey] = {};
+
+        // 일요일 → 전원 OFF
+        if (dow === 0) {
+          nurses.forEach((n) => { schedule[dayKey][n] = "OFF"; lastShift[n] = "OFF"; consecutive[n] = 0; });
+          continue;
+        }
+
+        // 이 날 연차로 OFF 고정인 사람
+        const onVacation = new Set();
+        nurses.forEach((n) => {
+          if (vacations[n] && vacations[n].includes(day)) {
+            schedule[dayKey][n] = "OFF";
+            onVacation.add(n);
+          }
+        });
+
+        // 배정 가능한 사람 풀
+        const available = nurses.filter((n) => !onVacation.has(n));
+
+        // 교대별로 인원 배정 (N → E → D 순: 나이트 다음날 데이 제약 때문에 나이트 먼저 확정)
+        const assignedToday = new Set();
+        const order = ["N", "E", "D"];
+
+        order.forEach((shift) => {
+          const need = minStaff[shift] || 0;
+          // 후보: 아직 오늘 배정 안 됨, 연차 아님
+          let candidates = available.filter((n) => !assignedToday.has(n));
+
+          // 제약: 나이트 다음 날 데이 금지
+          if (shift === "D") {
+            candidates = candidates.filter((n) => lastShift[n] !== "N");
+          }
+
+          // 정렬: 근무일 적은 사람 우선(공평), 연속근무 적은 사람 우선
+          candidates.sort((a, b) => {
+            if (consecutive[a] !== consecutive[b]) return consecutive[a] - consecutive[b];
+            if (workCount[a] !== workCount[b]) return workCount[a] - workCount[b];
+            return a.localeCompare(b, "ko");
+          });
+
+          const pick = candidates.slice(0, need);
+          if (pick.length < need) {
+            warnings.push(`${month + 1}월 ${day}일 ${SHIFTS.find(s=>s.key===shift).label}(${shift}): 필요 ${need}명, 배정 ${pick.length}명 (인원 부족)`);
+          }
+          pick.forEach((n) => {
+            schedule[dayKey][n] = shift;
+            assignedToday.add(n);
+          });
+        });
+
+        // 오늘 근무 안 잡힌 사람은 OFF
+        nurses.forEach((n) => {
+          if (!schedule[dayKey][n]) schedule[dayKey][n] = "OFF";
+        });
+
+        // 통계 업데이트
+        nurses.forEach((n) => {
+          const s = schedule[dayKey][n];
+          if (s === "OFF") { consecutive[n] = 0; }
+          else { workCount[n] += 1; consecutive[n] += 1; }
+          lastShift[n] = s;
+        });
+      }
+
+      return { schedule, daysInMonth, warnings };
+    }
+
+    function App() {
+      const today = new Date();
+      const [nurses, setNurses] = useState(["김간호", "이간호", "박간호", "최간호", "정간호", "한간호"]);
+      const [nameInput, setNameInput] = useState("");
+      const [year, setYear] = useState(today.getFullYear());
+      const [month, setMonth] = useState(today.getMonth()); // 0-based
+      const [minStaff, setMinStaff] = useState({ D: 2, E: 2, N: 1 });
+      const [vacations, setVacations] = useState({}); // { 이름: [일, 일, ...] }
+      const [vacNurse, setVacNurse] = useState("");
+      const [vacDay, setVacDay] = useState("");
+      const [result, setResult] = useState(null);
+
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      // 간호사 추가
+      const addNurse = () => {
+        const name = nameInput.trim();
+        if (!name) return;
+        if (nurses.includes(name)) { alert("이미 등록된 이름입니다."); return; }
+        setNurses([...nurses, name]);
+        setNameInput("");
+      };
+      const removeNurse = (name) => {
+        setNurses(nurses.filter((n) => n !== name));
+        const v = { ...vacations }; delete v[name]; setVacations(v);
+      };
+
+      // 연차 추가
+      const addVacation = () => {
+        if (!vacNurse) { alert("간호사를 선택하세요."); return; }
+        const d = parseInt(vacDay, 10);
+        if (!d || d < 1 || d > daysInMonth) { alert("올바른 날짜를 입력하세요 (1~" + daysInMonth + ")."); return; }
+        const cur = vacations[vacNurse] || [];
+        if (cur.includes(d)) return;
+        setVacations({ ...vacations, [vacNurse]: [...cur, d].sort((a, b) => a - b) });
+        setVacDay("");
+      };
+      const removeVacation = (name, d) => {
+        const cur = (vacations[name] || []).filter((x) => x !== d);
+        const v = { ...vacations };
+        if (cur.length) v[name] = cur; else delete v[name];
+        setVacations(v);
+      };
+
+      // 근무표 생성
+      const handleGenerate = () => {
+        if (nurses.length === 0) { alert("간호사를 먼저 등록하세요."); return; }
+        const r = generateSchedule(nurses, year, month, minStaff, vacations);
+        setResult(r);
+        setTimeout(() => {
+          const el = document.getElementById("calendar-section");
+          if (el) el.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      };
+
+      // 엑셀 내보내기
+      const exportExcel = () => {
+        if (!result) return;
+        const { schedule } = result;
+        // 시트1: 달력형 (행=간호사, 열=날짜)
+        const header = ["간호사 \\ 날짜"];
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dow = new Date(year, month, d).getDay();
+          header.push(`${d}(${WEEKDAYS[dow]})`);
+        }
+        header.push("D", "E", "N", "OFF");
+
+        const rows = [header];
+        nurses.forEach((n) => {
+          const row = [n];
+          const cnt = { D: 0, E: 0, N: 0, OFF: 0 };
+          for (let d = 1; d <= daysInMonth; d++) {
+            const s = schedule[d][n] || "OFF";
+            row.push(s === "OFF" ? "" : s);
+            cnt[s] = (cnt[s] || 0) + 1;
+          }
+          row.push(cnt.D, cnt.E, cnt.N, cnt.OFF);
+          rows.push(row);
+        });
+
+        // 하단: 교대별 일일 인원
+        const blank = [""];
+        rows.push(blank);
+        ["D", "E", "N"].forEach((shift) => {
+          const label = SHIFTS.find((s) => s.key === shift).label + `(${shift}) 인원`;
+          const row = [label];
+          for (let d = 1; d <= daysInMonth; d++) {
+            const c = nurses.filter((n) => schedule[d][n] === shift).length;
+            row.push(c);
+          }
+          rows.push(row);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws["!cols"] = header.map((_, i) => ({ wch: i === 0 ? 14 : 6 }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, `${year}년 ${month + 1}월`);
+        XLSX.writeFile(wb, `투석실_근무표_${year}년_${month + 1}월.xlsx`);
+      };
+
+      // 달력 렌더링용 주(week) 배열
+      const weeks = useMemo(() => {
+        if (!result) return [];
+        const firstDow = new Date(year, month, 1).getDay();
+        const cells = [];
+        for (let i = 0; i < firstDow; i++) cells.push(null);
+        for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+        while (cells.length % 7 !== 0) cells.push(null);
+        const w = [];
+        for (let i = 0; i < cells.length; i += 7) w.push(cells.slice(i, i + 7));
+        return w;
+      }, [result, year, month, daysInMonth]);
+
+      // 개인별 통계
+      const stats = useMemo(() => {
+        if (!result) return null;
+        const { schedule } = result;
+        const out = {};
+        nurses.forEach((n) => {
+          const c = { D: 0, E: 0, N: 0, OFF: 0 };
+          for (let d = 1; d <= daysInMonth; d++) {
+            const s = schedule[d][n] || "OFF";
+            c[s] = (c[s] || 0) + 1;
+          }
+          out[n] = c;
+        });
+        return out;
+      }, [result, nurses, daysInMonth]);
+
+      return (
+        <div className="wrap">
+          <h1>🏥 투석실 간호사 근무표 자동 생성기</h1>
+          <p className="subtitle">간호사·연차·최소 인원만 입력하면 한 달치 근무표를 자동으로 만들어 드립니다.</p>
+
+          {/* 1. 간호사 등록 */}
+          <div className="card">
+            <h2><span className="step">1</span> 간호사 등록 / 삭제</h2>
+            <div className="row">
+              <div className="field">
+                <label>간호사 이름</label>
+                <input
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addNurse()}
+                  placeholder="예: 홍길동"
+                />
+              </div>
+              <button className="btn-primary" onClick={addNurse}>+ 추가</button>
+            </div>
+            <div className="nurse-list">
+              {nurses.length === 0 && <span className="hint">아직 등록된 간호사가 없습니다.</span>}
+              {nurses.map((n) => (
+                <span className="nurse-chip" key={n}>
+                  {n}
+                  <button onClick={() => removeNurse(n)} title="삭제">×</button>
+                </span>
+              ))}
+            </div>
+            <p className="hint">이름을 입력하고 추가 버튼(또는 Enter)을 누르세요. × 를 누르면 삭제됩니다. (현재 {nurses.length}명)</p>
+          </div>
+
+          {/* 2. 기간 + 최소 인원 */}
+          <div className="card">
+            <h2><span className="step">2</span> 근무 월 & 교대별 최소 인원</h2>
+            <div className="row" style={{ marginBottom: 14 }}>
+              <div className="field">
+                <label>연도</label>
+                <select value={year} onChange={(e) => setYear(+e.target.value)}>
+                  {[year - 1, year, year + 1, year + 2].map((y) => <option key={y} value={y}>{y}년</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>월</label>
+                <select value={month} onChange={(e) => setMonth(+e.target.value)}>
+                  {Array.from({ length: 12 }, (_, i) => <option key={i} value={i}>{i + 1}월</option>)}
+                </select>
+              </div>
+            </div>
+            <label>교대별 하루 최소 인원</label>
+            <table className="min-table" style={{ width: "auto" }}>
+              <tbody>
+                <tr>
+                  {SHIFTS.map((s) => (
+                    <td key={s.key}>
+                      <div style={{ fontSize: 12, marginBottom: 4 }}>
+                        <span className={`tag tag-label ${s.color}`}>{s.key}</span> {s.label}
+                      </div>
+                      <input
+                        type="number" min="0"
+                        value={minStaff[s.key]}
+                        onChange={(e) => setMinStaff({ ...minStaff, [s.key]: Math.max(0, +e.target.value || 0) })}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+            <p className="hint">
+              일요일은 근무 없음(전원 OFF)이며, 월~토는 공휴일이라도 근무합니다.<br/>
+              각 교대(데이/이브닝/나이트)에 매일 최소 몇 명이 필요한지 정하세요.
+            </p>
+          </div>
+
+          {/* 3. 연차 */}
+          <div className="card">
+            <h2><span className="step">3</span> 연차 (휴무 희망일) 입력</h2>
+            <div className="row" style={{ marginBottom: 4 }}>
+              <div className="field">
+                <label>간호사</label>
+                <select value={vacNurse} onChange={(e) => setVacNurse(e.target.value)}>
+                  <option value="">선택</option>
+                  {nurses.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>날짜 (일)</label>
+                <input type="number" min="1" max={daysInMonth} value={vacDay}
+                  onChange={(e) => setVacDay(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addVacation()}
+                  placeholder={`1~${daysInMonth}`} style={{ width: 90 }} />
+              </div>
+              <button className="btn-primary" onClick={addVacation}>+ 연차 추가</button>
+            </div>
+            <p className="hint">선택한 날짜는 해당 간호사에게 OFF로 고정됩니다.</p>
+            <div style={{ marginTop: 10 }}>
+              {Object.keys(vacations).length === 0 && <span className="hint">등록된 연차가 없습니다.</span>}
+              {Object.keys(vacations).map((name) => (
+                <div key={name} style={{ marginBottom: 6, fontSize: 13 }}>
+                  <strong>{name}</strong>:&nbsp;
+                  {vacations[name].map((d) => (
+                    <span className="nurse-chip" key={d} style={{ marginRight: 4 }}>
+                      {d}일
+                      <button onClick={() => removeVacation(name, d)} title="삭제">×</button>
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. 생성 */}
+          <div className="card">
+            <h2><span className="step">4</span> 근무표 만들기</h2>
+            <div className="row">
+              <button className="btn-primary" style={{ fontSize: 15, padding: "11px 22px" }} onClick={handleGenerate}>
+                ⚙️ 근무표 자동 생성
+              </button>
+              {result && (
+                <button className="btn-green" style={{ fontSize: 15, padding: "11px 22px" }} onClick={exportExcel}>
+                  📥 Excel로 내보내기
+                </button>
+              )}
+            </div>
+            <p className="hint">버튼을 누르면 아래에 달력이 나타납니다. 규칙: 나이트(N) 다음 날 데이(D) 배정을 피합니다.</p>
+          </div>
+
+          {/* 결과 */}
+          {result && (
+            <div id="calendar-section">
+              <div className="card">
+                <h2>📅 {year}년 {month + 1}월 근무표</h2>
+
+                {result.warnings.length > 0 ? (
+                  <div className="warn">
+                    ⚠️ 아래 날짜는 인원이 부족합니다. 간호사를 더 등록하거나 최소 인원을 낮춰보세요.{"\n"}
+                    {result.warnings.join("\n")}
+                  </div>
+                ) : (
+                  <div className="ok">✅ 모든 교대의 최소 인원이 충족되었습니다.</div>
+                )}
+
+                <div className="legend">
+                  <span><span className="tag tag-label tag-D">D</span> 데이</span>
+                  <span><span className="tag tag-label tag-E">E</span> 이브닝</span>
+                  <span><span className="tag tag-label tag-N">N</span> 나이트</span>
+                  <span><span className="tag day-off" style={{ padding:"1px 5px" }}>OFF</span> 휴무</span>
+                </div>
+
+                <div className="cal-wrap" style={{ marginTop: 12 }}>
+                  <table className="cal">
+                    <thead>
+                      <tr>
+                        {WEEKDAYS.map((w, i) => (
+                          <th key={w} className={i === 0 ? "sun" : i === 6 ? "sat" : ""}>{w}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weeks.map((week, wi) => (
+                        <tr key={wi}>
+                          {week.map((d, di) => {
+                            if (d === null) return <td key={di} className="other-month"></td>;
+                            const dow = new Date(year, month, d).getDay();
+                            const isSunday = dow === 0;
+                            return (
+                              <td key={di} className={isSunday ? "sunday-cell" : ""}>
+                                <div className={"day-num " + (dow === 0 ? "sun" : dow === 6 ? "sat" : "")}>{d}</div>
+                                {isSunday ? (
+                                  <div className="tag day-off">휴무일</div>
+                                ) : (
+                                  SHIFTS.map((s) => {
+                                    const people = nurses.filter((n) => result.schedule[d][n] === s.key);
+                                    if (people.length === 0) return null;
+                                    return (
+                                      <div className="assign-line" key={s.key}>
+                                        <span className={`tag tag-label ${s.color}`}>{s.key}</span>
+                                        {people.map((p) => <span className="name-pill" key={p}>{p}</span>)}
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* 개인별 통계 + 행=간호사 표 */}
+              <div className="card">
+                <h2>👤 간호사별 근무 현황</h2>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="stat-table">
+                    <thead>
+                      <tr>
+                        <th>간호사</th>
+                        {Array.from({ length: daysInMonth }, (_, i) => {
+                          const dow = new Date(year, month, i + 1).getDay();
+                          return <th key={i} className={dow === 0 ? "sun" : dow === 6 ? "sat" : ""}>{i + 1}</th>;
+                        })}
+                        <th>D</th><th>E</th><th>N</th><th>OFF</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nurses.map((n) => (
+                        <tr key={n}>
+                          <td>{n}</td>
+                          {Array.from({ length: daysInMonth }, (_, i) => {
+                            const s = result.schedule[i + 1][n] || "OFF";
+                            const cls = s === "D" ? "tag-D" : s === "E" ? "tag-E" : s === "N" ? "tag-N" : "";
+                            return (
+                              <td key={i} style={s !== "OFF" ? { color: "#fff", fontWeight: 700 } : { color: "#9ca3af" }}
+                                  className={cls}>
+                                {s === "OFF" ? "·" : s}
+                              </td>
+                            );
+                          })}
+                          <td>{stats[n].D}</td><td>{stats[n].E}</td><td>{stats[n].N}</td><td>{stats[n].OFF}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="hint">색이 있는 칸은 근무, · 는 휴무(OFF)입니다. 맨 오른쪽 4칸은 한 달간 교대별 합계입니다.</p>
+              </div>
+            </div>
+          )}
+
+          <p className="subtitle" style={{ textAlign: "center", marginTop: 20 }}>
+            투석실 간호사 근무표 자동 생성기 · 브라우저에서 동작 (데이터는 저장되지 않습니다)
+          </p>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
